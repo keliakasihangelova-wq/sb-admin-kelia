@@ -1,0 +1,513 @@
+
+<?php
+
+$files = [
+
+'database/migrations/2026_01_01_000001_create_inventaris_tables.php' => <<<'CODE'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::create('kategoris', function (Blueprint $table) {
+            $table->id();
+            $table->string('nama_kategori');
+            $table->text('deskripsi')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('lokasis', function (Blueprint $table) {
+            $table->id();
+            $table->string('nama_lokasi');
+            $table->string('keterangan')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('suppliers', function (Blueprint $table) {
+            $table->id();
+            $table->string('nama_supplier');
+            $table->string('telepon')->nullable();
+            $table->text('alamat')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('barangs', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('kategori_id')->constrained('kategoris')->cascadeOnDelete();
+            $table->foreignId('lokasi_id')->constrained('lokasis')->cascadeOnDelete();
+            $table->foreignId('supplier_id')->nullable()->constrained('suppliers')->nullOnDelete();
+            $table->string('kode', 50)->unique();
+            $table->string('nama_barang');
+            $table->integer('jumlah')->default(0);
+            $table->string('kondisi')->default('Baik');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('barangs');
+        Schema::dropIfExists('suppliers');
+        Schema::dropIfExists('lokasis');
+        Schema::dropIfExists('kategoris');
+    }
+};
+CODE,
+
+'app/Models/Kategori.php' => <<<'CODE'
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Kategori extends Model
+{
+    protected $fillable = ['nama_kategori','deskripsi'];
+
+    public function barangs()
+    {
+        return $this->hasMany(Barang::class);
+    }
+}
+CODE,
+
+'app/Models/Lokasi.php' => <<<'CODE'
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Lokasi extends Model
+{
+    protected $fillable = ['nama_lokasi','keterangan'];
+
+    public function barangs()
+    {
+        return $this->hasMany(Barang::class);
+    }
+}
+CODE,
+
+'app/Models/Supplier.php' => <<<'CODE'
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Supplier extends Model
+{
+    protected $fillable = ['nama_supplier','telepon','alamat'];
+
+    public function barangs()
+    {
+        return $this->hasMany(Barang::class);
+    }
+}
+CODE,
+
+'app/Models/Barang.php' => <<<'CODE'
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Barang extends Model
+{
+    protected $fillable = [
+        'kategori_id','lokasi_id','supplier_id',
+        'kode','nama_barang','jumlah','kondisi'
+    ];
+
+    public function kategori() { return $this->belongsTo(Kategori::class); }
+    public function lokasi() { return $this->belongsTo(Lokasi::class); }
+    public function supplier() { return $this->belongsTo(Supplier::class); }
+}
+CODE,
+
+'app/Http/Controllers/InventarisController.php' => <<<'CODE'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Barang;
+use App\Models\Kategori;
+use App\Models\Lokasi;
+use App\Models\Supplier;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+
+class InventarisController extends Controller
+{
+    public function index(Request $request)
+    {
+        $jenis = $request->get('jenis', 'dashboard');
+        $data = [];
+
+        if ($jenis == 'barang') {
+            $data = Barang::with(['kategori','lokasi','supplier'])->latest()->get();
+        } elseif ($jenis == 'kategori') {
+            $data = Kategori::latest()->get();
+        } elseif ($jenis == 'lokasi') {
+            $data = Lokasi::latest()->get();
+        } elseif ($jenis == 'supplier') {
+            $data = Supplier::latest()->get();
+        }
+
+        return view('inventaris', [
+            'jenis' => $jenis,
+            'data' => $data,
+            'totalBarang' => Barang::count(),
+            'totalKategori' => Kategori::count(),
+            'totalLokasi' => Lokasi::count(),
+            'totalSupplier' => Supplier::count(),
+        ]);
+    }
+
+    public function store(Request $request)
+    {
+        $jenis = $request->jenis;
+
+        if ($jenis == 'kategori') {
+            $request->validate([
+                'nama_kategori' => 'required',
+                'deskripsi' => 'nullable'
+            ]);
+            Kategori::create($request->only('nama_kategori','deskripsi'));
+        } elseif ($jenis == 'lokasi') {
+            $request->validate([
+                'nama_lokasi' => 'required',
+                'keterangan' => 'nullable'
+            ]);
+            Lokasi::create($request->only('nama_lokasi','keterangan'));
+        } elseif ($jenis == 'supplier') {
+            $request->validate([
+                'nama_supplier' => 'required',
+                'telepon' => 'nullable',
+                'alamat' => 'nullable'
+            ]);
+            Supplier::create($request->only('nama_supplier','telepon','alamat'));
+        } elseif ($jenis == 'barang') {
+            $request->validate([
+                'kategori_id' => 'required|exists:kategoris,id',
+                'lokasi_id' => 'required|exists:lokasis,id',
+                'supplier_id' => 'nullable|exists:suppliers,id',
+                'kode' => 'required|unique:barangs,kode',
+                'nama_barang' => 'required',
+                'jumlah' => 'required|integer|min:0',
+                'kondisi' => 'required|in:Baik,Rusak'
+            ]);
+            Barang::create($request->only(
+                'kategori_id','lokasi_id','supplier_id',
+                'kode','nama_barang','jumlah','kondisi'
+            ));
+        }
+
+        return redirect('/inventaris?jenis='.$jenis)->with('success','Data berhasil disimpan!');
+    }
+
+    public function update(Request $request, $jenis, $id)
+    {
+        if ($jenis == 'kategori') {
+            $item = Kategori::findOrFail($id);
+            $item->update($request->validate([
+                'nama_kategori' => 'required',
+                'deskripsi' => 'nullable'
+            ]));
+        } elseif ($jenis == 'lokasi') {
+            $item = Lokasi::findOrFail($id);
+            $item->update($request->validate([
+                'nama_lokasi' => 'required',
+                'keterangan' => 'nullable'
+            ]));
+        } elseif ($jenis == 'supplier') {
+            $item = Supplier::findOrFail($id);
+            $item->update($request->validate([
+                'nama_supplier' => 'required',
+                'telepon' => 'nullable',
+                'alamat' => 'nullable'
+            ]));
+        } elseif ($jenis == 'barang') {
+            $item = Barang::findOrFail($id);
+            $item->update($request->validate([
+                'kategori_id' => 'required|exists:kategoris,id',
+                'lokasi_id' => 'required|exists:lokasis,id',
+                'supplier_id' => 'nullable|exists:suppliers,id',
+                'kode' => ['required',Rule::unique('barangs','kode')->ignore($id)],
+                'nama_barang' => 'required',
+                'jumlah' => 'required|integer|min:0',
+                'kondisi' => 'required|in:Baik,Rusak'
+            ]));
+        }
+
+        return redirect('/inventaris?jenis='.$jenis)->with('success','Data berhasil diubah!');
+    }
+
+    public function destroy($jenis, $id)
+    {
+        $model = match($jenis) {
+            'barang' => Barang::class,
+            'kategori' => Kategori::class,
+            'lokasi' => Lokasi::class,
+            'supplier' => Supplier::class,
+            default => abort(404)
+        };
+
+        $model::findOrFail($id)->delete();
+
+        return redirect('/inventaris?jenis='.$jenis)->with('success','Data berhasil dihapus!');
+    }
+}
+CODE,
+
+'routes/web.php' => <<<'CODE'
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\InventarisController;
+
+Route::get('/', fn() => redirect('/inventaris'));
+Route::get('/inventaris', [InventarisController::class, 'index']);
+Route::post('/inventaris', [InventarisController::class, 'store']);
+Route::put('/inventaris/{jenis}/{id}', [InventarisController::class, 'update']);
+Route::delete('/inventaris/{jenis}/{id}', [InventarisController::class, 'destroy']);
+CODE,
+
+'resources/views/inventaris.blade.php' => <<<'CODE'
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventaris Barang - SB Admin 2</title>
+<link href="https://cdn.jsdelivr.net/npm/startbootstrap-sb-admin-2@4.1.4/css/sb-admin-2.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+</head>
+<body id="page-top">
+<div id="wrapper">
+
+<ul class="navbar-nav bg-gradient-primary sidebar sidebar-dark accordion">
+<a class="sidebar-brand d-flex align-items-center justify-content-center" href="/inventaris">
+<i class="fas fa-boxes mr-2"></i> INVENTARIS
+</a>
+<hr class="sidebar-divider">
+<div class="sidebar-heading">Menu Utama</div>
+@foreach(['dashboard'=>'Dashboard','barang'=>'Data Barang','kategori'=>'Kategori','lokasi'=>'Lokasi','supplier'=>'Supplier','laporan'=>'Laporan'] as $key=>$nama)
+<li class="nav-item">
+<a class="nav-link" href="/inventaris?jenis={{$key}}">
+<i class="fas fa-fw fa-folder"></i>
+<span>{{$nama}}</span>
+</a>
+</li>
+@endforeach
+</ul>
+
+<div id="content-wrapper" class="d-flex flex-column">
+<div id="content">
+<nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 shadow">
+<span class="font-weight-bold text-primary">Sistem Informasi Inventaris Barang</span>
+</nav>
+
+<div class="container-fluid">
+@if(session('success'))
+<div class="alert alert-success">{{session('success')}}</div>
+@endif
+@if($errors->any())
+<div class="alert alert-danger">
+@foreach($errors->all() as $error)
+<div>{{$error}}</div>
+@endforeach
+</div>
+@endif
+
+@if($jenis=='dashboard')
+<h1 class="h3 mb-4 text-gray-800">Dashboard</h1>
+<div class="row">
+@foreach([
+['Barang',$totalBarang,'primary'],
+['Kategori',$totalKategori,'success'],
+['Lokasi',$totalLokasi,'info'],
+['Supplier',$totalSupplier,'warning']
+] as $card)
+<div class="col-xl-3 col-md-6 mb-4">
+<div class="card border-left-{{$card[2]}} shadow h-100 py-2">
+<div class="card-body">
+<div class="text-xs font-weight-bold text-{{$card[2]}} text-uppercase">{{$card[0]}}</div>
+<div class="h5 mb-0 font-weight-bold">{{$card[1]}}</div>
+</div></div></div>
+@endforeach
+</div>
+<div class="card shadow"><div class="card-body">
+Selamat datang di Sistem Informasi Inventaris Barang.
+</div></div>
+
+@else
+<h1 class="h3 mb-4 text-gray-800">
+{{ucfirst($jenis=='laporan'?'Laporan Barang':$jenis)}}
+</h1>
+
+@if($jenis!='laporan')
+<button class="btn btn-primary mb-3" data-toggle="modal" data-target="#formModal">
+<i class="fas fa-plus"></i> Tambah Data
+</button>
+@endif
+
+<div class="card shadow"><div class="card-body">
+<div class="table-responsive">
+<table class="table table-bordered">
+<thead class="bg-primary text-white">
+<tr>
+<th>No</th>
+@if($jenis=='barang')
+<th>Kode</th><th>Nama</th><th>Kategori</th><th>Lokasi</th><th>Supplier</th><th>Jumlah</th><th>Kondisi</th>
+@elseif($jenis=='kategori')
+<th>Nama Kategori</th><th>Deskripsi</th>
+@elseif($jenis=='lokasi')
+<th>Nama Lokasi</th><th>Keterangan</th>
+@elseif($jenis=='supplier')
+<th>Nama Supplier</th><th>Telepon</th><th>Alamat</th>
+@else
+<th>Data Barang</th>
+@endif
+@if($jenis!='laporan')<th>Aksi</th>@endif
+</tr>
+</thead>
+<tbody>
+@forelse($data as $item)
+<tr>
+<td>{{$loop->iteration}}</td>
+@if($jenis=='barang')
+<td>{{$item->kode}}</td><td>{{$item->nama_barang}}</td>
+<td>{{$item->kategori->nama_kategori}}</td><td>{{$item->lokasi->nama_lokasi}}</td>
+<td>{{$item->supplier->nama_supplier??'-'}}</td><td>{{$item->jumlah}}</td><td>{{$item->kondisi}}</td>
+@elseif($jenis=='kategori')
+<td>{{$item->nama_kategori}}</td><td>{{$item->deskripsi}}</td>
+@elseif($jenis=='lokasi')
+<td>{{$item->nama_lokasi}}</td><td>{{$item->keterangan}}</td>
+@elseif($jenis=='supplier')
+<td>{{$item->nama_supplier}}</td><td>{{$item->telepon}}</td><td>{{$item->alamat}}</td>
+@endif
+
+@if($jenis!='laporan')
+<td>
+<button class="btn btn-warning btn-sm" data-toggle="modal" data-target="#edit{{$item->id}}">Edit</button>
+<form action="/inventaris/{{$jenis}}/{{$item->id}}" method="POST" class="d-inline">
+@csrf @method('DELETE')
+<button class="btn btn-danger btn-sm" onclick="return confirm('Hapus data?')">Hapus</button>
+</form>
+</td>
+@endif
+</tr>
+
+<div class="modal fade" id="edit{{$item->id}}" tabindex="-1">
+<div class="modal-dialog"><div class="modal-content">
+<form method="POST" action="/inventaris/{{$jenis}}/{{$item->id}}">
+@csrf @method('PUT')
+<div class="modal-header"><h5>Edit Data</h5></div>
+<div class="modal-body">
+@if($jenis=='kategori')
+<label>Nama Kategori</label><input class="form-control mb-2" name="nama_kategori" value="{{$item->nama_kategori}}" required>
+<label>Deskripsi</label><input class="form-control" name="deskripsi" value="{{$item->deskripsi}}">
+@elseif($jenis=='lokasi')
+<label>Nama Lokasi</label><input class="form-control mb-2" name="nama_lokasi" value="{{$item->nama_lokasi}}" required>
+<label>Keterangan</label><input class="form-control" name="keterangan" value="{{$item->keterangan}}">
+@elseif($jenis=='supplier')
+<label>Nama Supplier</label><input class="form-control mb-2" name="nama_supplier" value="{{$item->nama_supplier}}" required>
+<label>Telepon</label><input class="form-control mb-2" name="telepon" value="{{$item->telepon}}">
+<label>Alamat</label><input class="form-control" name="alamat" value="{{$item->alamat}}">
+@elseif($jenis=='barang')
+<label>Kode</label><input class="form-control mb-2" name="kode" value="{{$item->kode}}" required>
+<label>Nama Barang</label><input class="form-control mb-2" name="nama_barang" value="{{$item->nama_barang}}" required>
+<label>Kategori</label><select class="form-control mb-2" name="kategori_id" required>
+@foreach(\App\Models\Kategori::all() as $k)<option value="{{$k->id}}" @selected($item->kategori_id==$k->id)>{{$k->nama_kategori}}</option>@endforeach
+</select>
+<label>Lokasi</label><select class="form-control mb-2" name="lokasi_id" required>
+@foreach(\App\Models\Lokasi::all() as $l)<option value="{{$l->id}}" @selected($item->lokasi_id==$l->id)>{{$l->nama_lokasi}}</option>@endforeach
+</select>
+<label>Supplier</label><select class="form-control mb-2" name="supplier_id"><option value="">-</option>
+@foreach(\App\Models\Supplier::all() as $s)<option value="{{$s->id}}" @selected($item->supplier_id==$s->id)>{{$s->nama_supplier}}</option>@endforeach
+</select>
+<label>Jumlah</label><input class="form-control mb-2" type="number" name="jumlah" value="{{$item->jumlah}}" min="0" required>
+<label>Kondisi</label><select class="form-control" name="kondisi"><option value="Baik" @selected($item->kondisi=='Baik')>Baik</option><option value="Rusak" @selected($item->kondisi=='Rusak')>Rusak</option></select>
+@endif
+</div>
+<div class="modal-footer">
+<button type="button" class="btn btn-secondary" data-dismiss="modal">Batal</button>
+<button class="btn btn-primary">Update</button>
+</div>
+</form>
+</div></div></div>
+@empty
+<tr><td colspan="10" class="text-center">Belum ada data</td></tr>
+@endforelse
+</tbody>
+</table>
+</div>
+</div></div>
+
+@if($jenis!='laporan')
+<div class="modal fade" id="formModal" tabindex="-1">
+<div class="modal-dialog"><div class="modal-content">
+<form method="POST" action="/inventaris">
+@csrf
+<input type="hidden" name="jenis" value="{{$jenis}}">
+<div class="modal-header"><h5>Tambah {{ucfirst($jenis)}}</h5></div>
+<div class="modal-body">
+
+@if($jenis=='kategori')
+<label>Nama Kategori</label><input class="form-control mb-2" name="nama_kategori" required>
+<label>Deskripsi</label><input class="form-control" name="deskripsi">
+@elseif($jenis=='lokasi')
+<label>Nama Lokasi</label><input class="form-control mb-2" name="nama_lokasi" required>
+<label>Keterangan</label><input class="form-control" name="keterangan">
+@elseif($jenis=='supplier')
+<label>Nama Supplier</label><input class="form-control mb-2" name="nama_supplier" required>
+<label>Telepon</label><input class="form-control mb-2" name="telepon">
+<label>Alamat</label><textarea class="form-control" name="alamat"></textarea>
+@elseif($jenis=='barang')
+<label>Kode Barang</label><input class="form-control mb-2" name="kode" required>
+<label>Nama Barang</label><input class="form-control mb-2" name="nama_barang" required>
+<label>Kategori</label><select class="form-control mb-2" name="kategori_id" required><option value="">Pilih Kategori</option>
+@foreach(\App\Models\Kategori::all() as $k)<option value="{{$k->id}}">{{$k->nama_kategori}}</option>@endforeach
+</select>
+<label>Lokasi</label><select class="form-control mb-2" name="lokasi_id" required><option value="">Pilih Lokasi</option>
+@foreach(\App\Models\Lokasi::all() as $l)<option value="{{$l->id}}">{{$l->nama_lokasi}}</option>@endforeach
+</select>
+<label>Supplier</label><select class="form-control mb-2" name="supplier_id"><option value="">Pilih Supplier</option>
+@foreach(\App\Models\Supplier::all() as $s)<option value="{{$s->id}}">{{$s->nama_supplier}}</option>@endforeach
+</select>
+<label>Jumlah</label><input class="form-control mb-2" type="number" name="jumlah" value="0" min="0" required>
+<label>Kondisi</label><select class="form-control" name="kondisi"><option>Baik</option><option>Rusak</option></select>
+@endif
+
+</div>
+<div class="modal-footer">
+<button type="button" class="btn btn-secondary" data-dismiss="modal">Batal</button>
+<button class="btn btn-primary">Simpan</button>
+</div>
+</form>
+</div></div></div>
+@endif
+@endif
+</div>
+</div>
+<footer class="sticky-footer bg-white"><div class="container my-auto text-center">Copyright © Inventaris Barang 2026</div></footer>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/startbootstrap-sb-admin-2@4.1.4/js/sb-admin-2.min.js"></script>
+</body>
+</html>
+CODE
+];
+
+foreach ($files as $path => $content) {
+    $folder = dirname($path);
+    if (!is_dir($folder)) {
+        mkdir($folder, 0777, true);
+    }
+    file_put_contents($path, $content);
+    echo "Berhasil membuat: $path\n";
+}
+
+echo "\nINSTALLER SELESAI!\n";
